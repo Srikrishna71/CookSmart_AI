@@ -1,122 +1,164 @@
-import { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useState, useMemo } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
 import { Navbar } from '@/components/Navbar';
 import { RecipeCard } from '@/components/RecipeCard';
 import { FilterPanel } from '@/components/FilterPanel';
+import { Skeleton } from '@/components/ui/skeleton';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { mockRecipes } from '@/data/mockRecipes';
 import { SlidersHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from '@/components/ui/sheet';
+import { useRecipes } from '@/hooks/useRecipes';
+import { favoriteApi } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
+import { toast } from 'sonner';
+import type { Recipe } from '@/types/recipe';
 
 const RecipeFeed = () => {
   const [searchParams] = useSearchParams();
-  const [recipes, setRecipes] = useState(mockRecipes);
-  const [selectedCuisine, setSelectedCuisine] = useState('All');
-  const [selectedCategory, setSelectedCategory] = useState('All');
-  const [selectedDietary, setSelectedDietary] = useState<string[]>([]);
-  const [selectedType, setSelectedType] = useState('all');
-  const [sortBy, setSortBy] = useState('newest');
+  const navigate = useNavigate();
+  const { user } = useAuth();
 
-  useEffect(() => {
-    const searchQuery = searchParams.get('search');
-    let filtered = [...mockRecipes];
+  // ─── Filter state ──────────────────────────────────────────────────────────
+  const [selectedCuisine, setSelectedCuisine]   = useState('All');
+  const [selectedDietary, setSelectedDietary]   = useState<string[]>([]);
+  const [selectedType, setSelectedType]         = useState('all');
+  const [sortBy, setSortBy]                     = useState('newest');
 
-    // Apply search filter - enhanced to search title, description, cuisine, category, ingredients, and tags
-    if (searchQuery) {
-      filtered = filtered.filter(
-        (recipe) =>
-          recipe.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          recipe.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          recipe.cuisine.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          recipe.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          recipe.ingredients.some((ing) => ing.toLowerCase().includes(searchQuery.toLowerCase())) ||
-          recipe.tags.some((tag) => tag.toLowerCase().includes(searchQuery.toLowerCase()))
-      );
-    }
+  // ─── API params ────────────────────────────────────────────────────────────
+  // Only params the backend actually supports are included here.
+  // selectedCategory (meal occasion: Breakfast/Lunch/Dinner…) is intentionally
+  // excluded — the backend's `category` field holds dietary type (veg/non-veg/vegan),
+  // not meal occasion. The Category dropdown is marked "Coming soon" in FilterPanel.
+  const searchQuery = searchParams.get('search') ?? '';
 
-    // Apply cuisine filter
-    if (selectedCuisine !== 'All') {
-      filtered = filtered.filter((recipe) => recipe.cuisine === selectedCuisine);
-    }
+  const apiParams = useMemo(() => ({
+    ...(searchQuery.trim()               ? { search: searchQuery.trim() }                    : {}),
+    ...(selectedCuisine !== 'All'        ? { cuisine: selectedCuisine }                      : {}),
+    ...(selectedType !== 'all'           ? { category: selectedType as 'veg' | 'non-veg' | 'vegan' } : {}),
+    limit: 24,
+  }), [searchQuery, selectedCuisine, selectedType]);
 
-    // Apply category filter
-    if (selectedCategory !== 'All') {
-      filtered = filtered.filter((recipe) => recipe.category === selectedCategory);
-    }
+  const { recipes: rawRecipes, pagination, isLoading, error, refetch } = useRecipes(apiParams);
 
-    // Apply dietary filters
+  // ─── Client-side processing ────────────────────────────────────────────────
+  // Applied to the page returned by the API after backend filtering.
+  // • Dietary tags  — backend has no tag-based filter param
+  // • Sorting       — backend always sorts by createdAt desc; popular/rating
+  //                   are sorted client-side on the returned page
+  const recipes = useMemo(() => {
+    let result: Recipe[] = [...rawRecipes];
+
+    // Dietary tag filter (Vegetarian / Vegan / Gluten-Free / Keto / Dairy-Free)
     if (selectedDietary.length > 0) {
-      filtered = filtered.filter((recipe) =>
+      result = result.filter((recipe) =>
         selectedDietary.some((dietary) =>
           recipe.tags.some((tag) => tag.toLowerCase().includes(dietary.toLowerCase()))
         )
       );
     }
 
-    // Apply type filter (veg/non-veg)
-    if (selectedType !== 'all') {
-      filtered = filtered.filter((recipe) => recipe.type === selectedType);
-    }
-
-    // Apply sorting
+    // Sort — 'newest' is already the backend default; re-sorting is a no-op
+    // but kept for consistency if the user explicitly reselects it
     switch (sortBy) {
       case 'newest':
-        filtered.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        result.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
         break;
       case 'popular':
-        filtered.sort((a, b) => b.reviewCount - a.reviewCount);
+        // ratingCount replaces old reviewCount field
+        result.sort((a, b) => b.ratingCount - a.ratingCount);
         break;
       case 'rating':
-        filtered.sort((a, b) => b.rating - a.rating);
+        result.sort((a, b) => b.rating - a.rating);
         break;
     }
 
-    setRecipes(filtered);
-  }, [searchParams, selectedCuisine, selectedCategory, selectedDietary, selectedType, sortBy]);
+    return result;
+  }, [rawRecipes, selectedDietary, sortBy]);
 
+  // ─── Handlers ──────────────────────────────────────────────────────────────
   const handleDietaryChange = (value: string, checked: boolean) => {
     setSelectedDietary((prev) =>
       checked ? [...prev, value] : prev.filter((item) => item !== value)
     );
   };
 
-  const handleFavoriteToggle = (id: string) => {
-    console.log('Toggled favorite for recipe:', id);
-    // TODO: Implement favorite toggle with backend
+  const handleFavoriteToggle = async (id: string) => {
+    if (!user) {
+      toast.error('Please sign in to save favorites');
+      navigate('/login');
+      return;
+    }
+    try {
+      const res = await favoriteApi.toggle(id);
+      toast.success(res.data.message);
+      refetch();
+    } catch {
+      toast.error('Failed to update favorite. Please try again.');
+    }
   };
+
+  // ─── Skeleton ──────────────────────────────────────────────────────────────
+  const CardSkeleton = () => (
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
+      <Skeleton className="aspect-[4/3] w-full" />
+      <div className="p-4 space-y-3">
+        <Skeleton className="h-5 w-3/4" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-5/6" />
+        <div className="flex items-center justify-between pt-1">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-4 w-16" />
+        </div>
+        <div className="flex items-center gap-2 pt-2 border-t border-border">
+          <Skeleton className="h-6 w-6 rounded-full" />
+          <Skeleton className="h-4 w-28" />
+        </div>
+      </div>
+    </div>
+  );
+
+  // ─── Recipe count label ────────────────────────────────────────────────────
+  // During loading: no count shown.
+  // After load: prefer the backend total (pagination.total) when no client-side
+  // dietary filter is active; fall back to the length of the processed list.
+  const recipeCount = isLoading
+    ? null
+    : selectedDietary.length > 0
+      ? recipes.length
+      : (pagination?.total ?? recipes.length);
 
   return (
     <div className="min-h-screen bg-background">
       <Navbar />
 
       <div className="container mx-auto px-4 py-8">
-        {/* Header */}
+        {/* Header — layout unchanged */}
         <div className="mb-8">
           <h1 className="text-4xl font-bold mb-2">Discover Recipes</h1>
           <p className="text-muted-foreground">
-            {recipes.length} {recipes.length === 1 ? 'recipe' : 'recipes'} found
+            {recipeCount === null
+              ? 'Loading recipes…'
+              : `${recipeCount} ${recipeCount === 1 ? 'recipe' : 'recipes'} found`}
           </p>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-          {/* Desktop Filters */}
+          {/* Desktop Filters — layout unchanged */}
           <aside className="hidden lg:block">
             <FilterPanel
               selectedCuisine={selectedCuisine}
-              selectedCategory={selectedCategory}
               selectedDietary={selectedDietary}
               selectedType={selectedType}
               onCuisineChange={setSelectedCuisine}
-              onCategoryChange={setSelectedCategory}
               onDietaryChange={handleDietaryChange}
               onTypeChange={setSelectedType}
             />
           </aside>
 
-          {/* Main Content */}
+          {/* Main Content — layout unchanged */}
           <div className="lg:col-span-3 space-y-6">
-            {/* Controls Bar */}
+            {/* Controls Bar — layout unchanged */}
             <div className="flex items-center justify-between">
               {/* Mobile Filter Toggle */}
               <Sheet>
@@ -133,11 +175,9 @@ const RecipeFeed = () => {
                   <div className="mt-6">
                     <FilterPanel
                       selectedCuisine={selectedCuisine}
-                      selectedCategory={selectedCategory}
                       selectedDietary={selectedDietary}
                       selectedType={selectedType}
                       onCuisineChange={setSelectedCuisine}
-                      onCategoryChange={setSelectedCategory}
                       onDietaryChange={handleDietaryChange}
                       onTypeChange={setSelectedType}
                     />
@@ -145,7 +185,7 @@ const RecipeFeed = () => {
                 </SheetContent>
               </Sheet>
 
-              {/* Sort Options */}
+              {/* Sort Options — unchanged */}
               <div className="flex items-center gap-2">
                 <span className="text-sm text-muted-foreground hidden sm:inline">Sort by:</span>
                 <Select value={sortBy} onValueChange={setSortBy}>
@@ -162,17 +202,29 @@ const RecipeFeed = () => {
             </div>
 
             {/* Recipe Grid */}
-            {recipes.length > 0 ? (
+            {isLoading ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <CardSkeleton key={i} />
+                ))}
+              </div>
+            ) : error ? (
+              <div className="text-center py-12 space-y-4">
+                <p className="text-lg text-muted-foreground">Failed to load recipes.</p>
+                <Button variant="outline" onClick={refetch}>Try Again</Button>
+              </div>
+            ) : recipes.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
                 {recipes.map((recipe) => (
                   <RecipeCard
-                    key={recipe.id}
+                    key={recipe._id}
                     recipe={recipe}
                     onFavoriteToggle={handleFavoriteToggle}
                   />
                 ))}
               </div>
             ) : (
+              // Empty state — layout and text unchanged
               <div className="text-center py-12 space-y-2">
                 <p className="text-2xl">😔</p>
                 <p className="text-lg text-muted-foreground">No recipes found for your search</p>

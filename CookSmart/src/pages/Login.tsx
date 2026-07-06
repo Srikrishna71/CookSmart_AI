@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,40 +8,69 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Checkbox } from '@/components/ui/checkbox';
 import { ChefHat } from 'lucide-react';
 import { toast } from 'sonner';
+import { useAuth } from '@/contexts/AuthContext';
 
 const Login = () => {
   const navigate = useNavigate();
+  const { login, register, user } = useAuth();
+
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [signupName, setSignupName] = useState('');
   const [signupEmail, setSignupEmail] = useState('');
   const [signupPassword, setSignupPassword] = useState('');
   const [rememberMe, setRememberMe] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleLogin = (e: React.FormEvent) => {
+  // If already logged in, redirect away from /login
+  useEffect(() => {
+    if (user) {
+      navigate('/', { replace: true });
+    }
+  }, [user, navigate]);
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!loginEmail || !loginPassword) {
       toast.error('Please fill in all fields');
       return;
     }
 
-    // TODO: Implement actual login with backend
-    toast.success('Logged in successfully!');
-    setTimeout(() => navigate('/'), 1500);
+    setIsSubmitting(true);
+    try {
+      await login(loginEmail, loginPassword);
+      toast.success('Logged in successfully!');
+      navigate('/');
+    } catch (err: any) {
+      const message =
+        err?.response?.data?.message || err?.message || 'Login failed. Please try again.';
+      toast.error(message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleSignup = (e: React.FormEvent) => {
+  const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!signupName || !signupEmail || !signupPassword) {
       toast.error('Please fill in all fields');
       return;
     }
 
-    // TODO: Implement actual signup with backend
-    toast.success('Account created successfully!');
-    setTimeout(() => navigate('/'), 1500);
+    setIsSubmitting(true);
+    try {
+      await register(signupName, signupEmail, signupPassword);
+      toast.success('Account created successfully!');
+      navigate('/');
+    } catch (err: any) {
+      const message =
+        err?.response?.data?.message || err?.message || 'Registration failed. Please try again.';
+      toast.error(message);
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -111,8 +140,12 @@ const Login = () => {
                   </a>
                 </div>
 
-                <Button type="submit" className="w-full bg-gradient-primary hover:opacity-90">
-                  Sign In
+                <Button
+                  type="submit"
+                  className="w-full bg-gradient-primary hover:opacity-90"
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? 'Signing in...' : 'Sign In'}
                 </Button>
               </form>
             </TabsContent>
@@ -159,8 +192,12 @@ const Login = () => {
                   </p>
                 </div>
 
-                <Button type="submit" className="w-full bg-gradient-primary hover:opacity-90">
-                  Create Account
+                <Button
+                  type="submit"
+                  className="w-full bg-gradient-primary hover:opacity-90"
+                  disabled={isSubmitting}
+                >
+                  {isSubmitting ? 'Creating account...' : 'Create Account'}
                 </Button>
               </form>
             </TabsContent>

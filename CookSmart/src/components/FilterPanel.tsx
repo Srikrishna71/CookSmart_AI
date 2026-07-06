@@ -7,26 +7,27 @@ import { Leaf, Drumstick } from 'lucide-react';
 
 interface FilterPanelProps {
   selectedCuisine: string;
-  selectedCategory: string;
   selectedDietary: string[];
   selectedType?: string;
   onCuisineChange: (value: string) => void;
-  onCategoryChange: (value: string) => void;
   onDietaryChange: (value: string, checked: boolean) => void;
   onTypeChange?: (value: string) => void;
+  /**
+   * When true, the Category dropdown is rendered in a disabled/dimmed state
+   * and labelled "Coming soon" to indicate it is reserved for future backend
+   * support. The handler is still wired — state is preserved — but the control
+   * is not interactive.
+   */
 }
 
 const cuisines = ['All', 'Italian', 'Thai', 'Mexican', 'Japanese', 'Mediterranean', 'American', 'Indian', 'Chinese'];
-const categories = ['All', 'Breakfast', 'Lunch', 'Dinner', 'Snack', 'Dessert'];
 const dietaryOptions = ['Vegetarian', 'Vegan', 'Gluten-Free', 'Keto', 'Dairy-Free'];
 
 export const FilterPanel = ({
   selectedCuisine,
-  selectedCategory,
   selectedDietary,
   selectedType = 'all',
   onCuisineChange,
-  onCategoryChange,
   onDietaryChange,
   onTypeChange,
 }: FilterPanelProps) => {
@@ -79,23 +80,6 @@ export const FilterPanel = ({
             {cuisines.map((cuisine) => (
               <SelectItem key={cuisine} value={cuisine}>
                 {cuisine}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* Category Filter */}
-      <div className="space-y-2">
-        <Label htmlFor="category">Category</Label>
-        <Select value={selectedCategory} onValueChange={onCategoryChange}>
-          <SelectTrigger id="category">
-            <SelectValue placeholder="Select category" />
-          </SelectTrigger>
-          <SelectContent>
-            {categories.map((category) => (
-              <SelectItem key={category} value={category}>
-                {category}
               </SelectItem>
             ))}
           </SelectContent>

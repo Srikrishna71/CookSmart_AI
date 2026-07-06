@@ -1,25 +1,36 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, TrendingUp, Clock, Star, Leaf, Drumstick } from 'lucide-react';
+import { Search, TrendingUp, Clock, Leaf, Drumstick } from 'lucide-react';
 import { Navbar } from '@/components/Navbar';
 import { RecipeCard } from '@/components/RecipeCard';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { mockRecipes } from '@/data/mockRecipes';
+import { Skeleton } from '@/components/ui/skeleton';
+import { useRecipes } from '@/hooks/useRecipes';
+import { favoriteApi } from '@/services/api';
+import { useAuth } from '@/contexts/AuthContext';
+import { toast } from 'sonner';
 import heroImage from '@/assets/hero-image.jpg';
 
 const Home = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [searchQuery, setSearchQuery] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'all' | 'veg' | 'non-veg'>('all');
+  const [typeFilter, setTypeFilter] = useState<'all' | 'veg' | 'non-veg' | 'vegan'>('all');
 
-  const filterByType = (recipes: typeof mockRecipes) => {
-    if (typeFilter === 'all') return recipes;
-    return recipes.filter((recipe) => recipe.type === typeFilter);
+  // Fetch 6 recipes from MongoDB — first 3 shown as Trending, next 3 as Recently Added.
+  // Backend sorts by createdAt desc. No params needed beyond limit.
+  const { recipes, isLoading, error, refetch } = useRecipes({ limit: 6 });
+
+  // Client-side dietary filter applied to the fetched page.
+  // 'category' is the MongoDB field — replaces old 'type' field.
+  const filterByCategory = (list: typeof recipes) => {
+    if (typeFilter === 'all') return list;
+    return list.filter((r) => r.category === typeFilter);
   };
 
-  const trendingRecipes = filterByType(mockRecipes.slice(0, 3));
-  const recentRecipes = filterByType(mockRecipes.slice(3, 6));
+  const trendingRecipes = filterByCategory(recipes.slice(0, 3));
+  const recentRecipes   = filterByCategory(recipes.slice(3, 6));
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,16 +39,55 @@ const Home = () => {
     }
   };
 
-  const handleFavoriteToggle = (id: string) => {
-    console.log('Toggled favorite for recipe:', id);
-    // TODO: Implement favorite toggle with backend
+  const handleFavoriteToggle = async (id: string) => {
+    if (!user) {
+      toast.error('Please sign in to save favorites');
+      navigate('/login');
+      return;
+    }
+    try {
+      const res = await favoriteApi.toggle(id);
+      toast.success(res.data.message);
+      // Refetch so isFavorited state on all cards stays in sync
+      refetch();
+    } catch {
+      toast.error('Failed to update favorite. Please try again.');
+    }
   };
+
+  // ─── Skeleton grid — 3 cards matching RecipeCard dimensions ──────────────
+  const CardSkeleton = () => (
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
+      <Skeleton className="aspect-[4/3] w-full" />
+      <div className="p-4 space-y-3">
+        <Skeleton className="h-5 w-3/4" />
+        <Skeleton className="h-4 w-full" />
+        <Skeleton className="h-4 w-5/6" />
+        <div className="flex items-center justify-between pt-1">
+          <Skeleton className="h-4 w-24" />
+          <Skeleton className="h-4 w-16" />
+        </div>
+        <div className="flex items-center gap-2 pt-2 border-t border-border">
+          <Skeleton className="h-6 w-6 rounded-full" />
+          <Skeleton className="h-4 w-28" />
+        </div>
+      </div>
+    </div>
+  );
+
+  const SkeletonGrid = () => (
+    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <CardSkeleton />
+      <CardSkeleton />
+      <CardSkeleton />
+    </div>
+  );
 
   return (
     <div className="min-h-screen bg-background">
       <Navbar onSearch={(query) => navigate(`/recipes?search=${query}`)} />
 
-      {/* Hero Section */}
+      {/* Hero Section — unchanged */}
       <section className="relative overflow-hidden bg-gradient-hero">
         <div className="absolute inset-0">
           <img
@@ -93,16 +143,16 @@ const Home = () => {
             {/* Stats */}
             <div className="flex flex-wrap justify-center gap-8 pt-8">
               <div className="text-center">
-                <div className="text-3xl font-bold text-primary">1000+</div>
+                <div className="text-3xl font-bold text-primary">100+</div>
                 <div className="text-sm text-muted-foreground">Recipes</div>
               </div>
               <div className="text-center">
-                <div className="text-3xl font-bold text-secondary">500+</div>
+                <div className="text-3xl font-bold text-secondary">50+</div>
                 <div className="text-sm text-muted-foreground">Chefs</div>
               </div>
               <div className="text-center">
-                <div className="text-3xl font-bold text-accent">50K+</div>
-                <div className="text-sm text-muted-foreground">Community</div>
+                <div className="text-3xl font-bold text-accent">1K+</div>
+                <div className="text-sm text-muted-foreground">AI Generations</div>
               </div>
             </div>
           </div>
@@ -120,7 +170,7 @@ const Home = () => {
             <p className="text-muted-foreground">Most popular recipes this week</p>
           </div>
           
-          {/* Type Filter Buttons */}
+          {/* Dietary Filter Buttons — layout unchanged */}
           <div className="flex gap-2">
             <Button
               variant={typeFilter === 'all' ? 'default' : 'outline'}
@@ -150,21 +200,31 @@ const Home = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {trendingRecipes.length > 0 ? (
-            trendingRecipes.map((recipe) => (
+        {/* Loading state */}
+        {isLoading ? (
+          <SkeletonGrid />
+        ) : error ? (
+          <div className="col-span-full text-center py-12">
+            <p className="text-muted-foreground mb-4">Failed to load recipes.</p>
+            <Button variant="outline" onClick={refetch}>Try Again</Button>
+          </div>
+        ) : trendingRecipes.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            {trendingRecipes.map((recipe) => (
               <RecipeCard
-                key={recipe.id}
+                key={recipe._id}
                 recipe={recipe}
                 onFavoriteToggle={handleFavoriteToggle}
               />
-            ))
-          ) : (
-            <div className="col-span-full text-center py-12">
-              <p className="text-muted-foreground">No {typeFilter === 'veg' ? 'vegetarian' : 'non-vegetarian'} recipes found in trending.</p>
-            </div>
-          )}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="text-center py-12">
+            <p className="text-muted-foreground">
+              No {typeFilter === 'veg' ? 'vegetarian' : 'non-vegetarian'} recipes found in trending.
+            </p>
+          </div>
+        )}
       </section>
 
       {/* Recently Added */}
@@ -187,19 +247,27 @@ const Home = () => {
             </Button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {recentRecipes.map((recipe) => (
-              <RecipeCard
-                key={recipe.id}
-                recipe={recipe}
-                onFavoriteToggle={handleFavoriteToggle}
-              />
-            ))}
-          </div>
+          {isLoading ? (
+            <SkeletonGrid />
+          ) : error ? null : recentRecipes.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {recentRecipes.map((recipe) => (
+                <RecipeCard
+                  key={recipe._id}
+                  recipe={recipe}
+                  onFavoriteToggle={handleFavoriteToggle}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-12">
+              <p className="text-muted-foreground">No recently added recipes.</p>
+            </div>
+          )}
         </div>
       </section>
 
-      {/* CTA Section */}
+      {/* CTA Section — unchanged */}
       <section className="py-20 bg-gradient-primary">
         <div className="container mx-auto px-4 text-center">
           <div className="max-w-2xl mx-auto space-y-6">
@@ -231,7 +299,7 @@ const Home = () => {
         </div>
       </section>
 
-      {/* Footer */}
+      {/* Footer — unchanged */}
       <footer className="py-12 border-t border-border">
         <div className="container mx-auto px-4">
           <div className="flex flex-col md:flex-row justify-between items-center gap-4">
@@ -251,7 +319,7 @@ const Home = () => {
             </div>
           </div>
           <div className="mt-8 text-center text-sm text-muted-foreground">
-            © 2025 CookSmart. All rights reserved.
+            © 2026 CookSmart. All rights reserved.
           </div>
         </div>
       </footer>

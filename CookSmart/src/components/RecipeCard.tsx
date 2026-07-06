@@ -4,7 +4,8 @@ import { Heart, Clock, Users, Star, Leaf, Drumstick } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Recipe } from '@/data/mockRecipes';
+import { Avatar, AvatarImage, AvatarFallback } from '@/components/ui/avatar';
+import type { Recipe } from '@/types/recipe';
 import { cn } from '@/lib/utils';
 
 interface RecipeCardProps {
@@ -12,18 +13,41 @@ interface RecipeCardProps {
   onFavoriteToggle?: (id: string) => void;
 }
 
+// Derive up-to-2-character initials from a display name.
+// "Chef Marco" → "CM" | "CookSmart" → "CS" | "A" → "A"
+const getInitials = (name: string): string => {
+  const parts = name.trim().split(/\s+/);
+  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+};
+
 export const RecipeCard = ({ recipe, onFavoriteToggle }: RecipeCardProps) => {
-  const [isFavorite, setIsFavorite] = useState(recipe.isFavorite);
+  // isFavorited is optional on the new type (absent for anonymous users).
+  // Default to false so the heart renders correctly when no token is present.
+  const [isFavorite, setIsFavorite] = useState(recipe.isFavorited ?? false);
   const [isHovered, setIsHovered] = useState(false);
+
+  // Image fallback — seeded recipes have image: "" so we fall back to the
+  // static placeholder served from public/placeholder-recipe.jpg.
+  const recipeImage = recipe.image?.trim() || '/placeholder-recipe.jpg';
+
+  // Author resolution priority:
+  //   1. recipe.authorName  — plain string stored on seeded recipes
+  //   2. recipe.author      — legacy field (kept for forward compat)
+  //   3. 'CookSmart'        — final fallback
+  const authorName   = recipe.authorName?.trim() || recipe.author?.trim() || 'CookSmart';
+  const authorAvatar = recipe.authorAvatar?.trim() || '';
 
   const handleFavoriteClick = (e: React.MouseEvent) => {
     e.preventDefault();
     setIsFavorite(!isFavorite);
-    onFavoriteToggle?.(recipe.id);
+    // Pass _id — MongoDB ObjectId string, replaces the old numeric string id
+    onFavoriteToggle?.(recipe._id);
   };
 
   return (
-    <Link to={`/recipe/${recipe.id}`}>
+    // Route uses _id — matches GET /api/recipes/:id on the backend
+    <Link to={`/recipe/${recipe._id}`}>
       <Card
         className={cn(
           "group overflow-hidden transition-all duration-300 hover:shadow-hover border-border",
@@ -35,7 +59,7 @@ export const RecipeCard = ({ recipe, onFavoriteToggle }: RecipeCardProps) => {
         {/* Image */}
         <div className="relative aspect-[4/3] overflow-hidden bg-muted">
           <img
-            src={recipe.image}
+            src={recipeImage}
             alt={recipe.title}
             className={cn(
               "h-full w-full object-cover transition-transform duration-500",
@@ -64,19 +88,24 @@ export const RecipeCard = ({ recipe, onFavoriteToggle }: RecipeCardProps) => {
               variant="secondary"
               className={cn(
                 "bg-background/80 backdrop-blur-sm border-border",
-                recipe.difficulty === 'Easy' && "border-accent/50",
+                recipe.difficulty === 'Easy'   && "border-accent/50",
                 recipe.difficulty === 'Medium' && "border-primary/50",
-                recipe.difficulty === 'Hard' && "border-secondary/50"
+                recipe.difficulty === 'Hard'   && "border-secondary/50"
               )}
             >
               {recipe.difficulty}
             </Badge>
-            
-            {/* Veg/Non-Veg Badge */}
-            {recipe.type === 'veg' ? (
+
+            {/* Dietary Badge — veg / vegan / non-veg */}
+            {recipe.category === 'veg' ? (
               <Badge className="bg-green-500 hover:bg-green-600 text-white border-0 shadow-lg flex items-center gap-1">
                 <Leaf className="h-3 w-3" />
                 Veg
+              </Badge>
+            ) : recipe.category === 'vegan' ? (
+              <Badge className="bg-green-700 hover:bg-green-800 text-white border-0 shadow-lg flex items-center gap-1">
+                <Leaf className="h-3 w-3" />
+                Vegan
               </Badge>
             ) : (
               <Badge className="bg-red-500 hover:bg-red-600 text-white border-0 shadow-lg flex items-center gap-1">
@@ -121,18 +150,23 @@ export const RecipeCard = ({ recipe, onFavoriteToggle }: RecipeCardProps) => {
             <div className="flex items-center space-x-1">
               <Star className="h-4 w-4 fill-accent text-accent" />
               <span className="font-medium text-foreground">{recipe.rating}</span>
-              <span className="text-muted-foreground">({recipe.reviewCount})</span>
+              {/* ratingCount replaces reviewCount — same field, renamed in MongoDB schema */}
+              <span className="text-muted-foreground">({recipe.ratingCount})</span>
             </div>
           </div>
 
           {/* Author */}
           <div className="mt-3 pt-3 border-t border-border flex items-center space-x-2">
-            <img
-              src={recipe.authorAvatar}
-              alt={recipe.author}
-              className="h-6 w-6 rounded-full"
-            />
-            <span className="text-sm text-muted-foreground">{recipe.author}</span>
+            {/* Avatar with Radix fallback — no external service needed.
+                AvatarImage loads the URL if present; AvatarFallback renders
+                initials on broken/missing URLs automatically. */}
+            <Avatar className="h-6 w-6">
+              <AvatarImage src={authorAvatar} alt={authorName} />
+              <AvatarFallback className="text-[10px] bg-primary/10 text-primary">
+                {getInitials(authorName)}
+              </AvatarFallback>
+            </Avatar>
+            <span className="text-sm text-muted-foreground">{authorName}</span>
           </div>
         </div>
       </Card>
