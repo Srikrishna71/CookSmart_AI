@@ -151,7 +151,7 @@ const Home = () => {
                 <div className="text-sm text-muted-foreground">Chefs</div>
               </div>
               <div className="text-center">
-                <div className="text-3xl font-bold text-accent">1K+</div>
+                <div className="text-3xl font-bold text-accent">24/7</div>
                 <div className="text-sm text-muted-foreground">AI Generations</div>
               </div>
             </div>
@@ -290,7 +290,7 @@ const Home = () => {
                 size="lg"
                 variant="outline"
                 onClick={() => navigate('/recipes')}
-                className="border-primary-foreground/30 text-primary-foreground hover:bg-primary-foreground/10"
+                className="border-white/60 text-primary-foreground hover:bg-white/20 hover:border-white hover:text-white"
               >
                 Explore Recipes
               </Button>
@@ -328,3 +328,4 @@ const Home = () => {
 };
 
 export default Home;
+

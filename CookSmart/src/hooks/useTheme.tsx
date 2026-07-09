@@ -5,7 +5,7 @@ type Theme = 'light' | 'dark';
 export const useTheme = () => {
   const [theme, setTheme] = useState<Theme>(() => {
     const stored = localStorage.getItem('cooksmart-theme');
-    return (stored as Theme) || 'light';
+    return (stored as Theme) || 'dark';
   });
 
   useEffect(() => {
@@ -21,3 +21,4 @@ export const useTheme = () => {
 
   return { theme, toggleTheme };
 };
+

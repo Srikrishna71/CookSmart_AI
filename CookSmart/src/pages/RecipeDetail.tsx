@@ -13,7 +13,7 @@ import { useRecommendations } from '@/hooks/useRecommendations';
 import { RecipeCard } from '@/components/RecipeCard';
 import { favoriteApi, recipeApi } from '@/services/api';
 import { useAuth } from '@/contexts/AuthContext';
-import { Clock, Users, Heart, ChefHat, Share2, Bookmark, Lightbulb, Leaf, Drumstick, Pencil, Trash2, Clapperboard, CheckCircle2 } from 'lucide-react';
+import { Clock, Users, Heart, ChefHat, Share2, Lightbulb, Leaf, Drumstick, Pencil, Trash2, Clapperboard, CheckCircle2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { RecipeStoryboard } from '@/components/RecipeStoryboard';
@@ -295,10 +295,6 @@ const RecipeDetail = () => {
                 <Share2 className="h-5 w-5 mr-2" />
                 Share
               </Button>
-              <Button variant="outline">
-                <Bookmark className="h-5 w-5 mr-2" />
-                Save
-              </Button>
 
               {/* Storyboard button — available to all logged-in users */}
               {user && (
@@ -519,6 +515,7 @@ const RecipeDetail = () => {
         <RecipeStoryboard
           title={recipe.title}
           image={storyboardImage}
+          ingredients={recipe.ingredients}
           slides={storyboardSlides}
           onClose={() => { setStoryboardSlides(null); setStoryboardImage(''); }}
         />
