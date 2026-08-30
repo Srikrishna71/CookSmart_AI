@@ -3,13 +3,138 @@ const Recipe = require("../models/Recipe");
 const MealPlan = require("../models/MealPlan");
 const AppError = require("../middleware/AppError");
 
-// ─── Helper: parse Gemini response safely ─────────────────────────────────────
-const parseGeminiJSON = (text) => {
-  const clean = text.replace(/^```json\s*/i, "").replace(/\s*```$/i, "").trim();
+// ─── Helper: robustly extract JSON from a Gemini response string ──────────────
+//
+// Gemini returns raw JSON when responseMimeType:'application/json' is set, but
+// in practice (especially with gemini-2.5-flash) the response can include:
+//   • Markdown fences:  ```json\n{...}\n```
+//   • Preamble text:    "Here is the recipe:\n```json\n{...}"
+//   • Trailing text:    "{...}\n```\nLet me know if you need anything else."
+//   • Extra whitespace / BOM characters
+//   • A nested text property (older SDK versions)
+//
+// Strategy:
+//   1. Ensure we're working with a plain string (not an SDK object).
+//   2. Try JSON.parse on the raw/trimmed string — succeeds for clean responses.
+//   3. Find the first '{' and last '}' and extract the substring — handles
+//      preamble/postamble text around a valid JSON object.
+//   4. Find and strip any markdown fences, then retry.
+//   5. If all attempts fail, throw with a descriptive message for Render logs.
+//
+const parseGeminiJSON = (rawResponse) => {
+  // Step 0 — normalise to string (SDK may return object or string)
+  let text = typeof rawResponse === "string"
+    ? rawResponse
+    : rawResponse?.text?.() ?? String(rawResponse ?? "");
+
+  // Strip BOM if present
+  text = text.replace(/^\uFEFF/, "").trim();
+
+  if (!text) {
+    throw new AppError("Gemini returned an empty response. Please try again.", 502);
+  }
+
+  // Step 1 — try parsing as-is (ideal: responseMimeType worked perfectly)
   try {
-    return JSON.parse(clean);
-  } catch {
-    throw new AppError("AI returned an unexpected response format. Please try again.", 502);
+    return JSON.parse(text);
+  } catch { /* fall through */ }
+
+  // Step 2 — extract the outermost {...} object, ignoring any surrounding text.
+  // This handles preamble ("Here is the recipe:\n```json") and postamble.
+  const firstBrace = text.indexOf("{");
+  const lastBrace  = text.lastIndexOf("}");
+  if (firstBrace !== -1 && lastBrace > firstBrace) {
+    const candidate = text.slice(firstBrace, lastBrace + 1);
+    try {
+      return JSON.parse(candidate);
+    } catch { /* fall through */ }
+  }
+
+  // Step 3 — strip markdown fences and try again.
+  // Handles: ```json\n{...}\n``` and ``` \n{...}\n``` variants.
+  const fenceStripped = text
+    .replace(/^```(?:json)?\s*/im, "")
+    .replace(/\s*```\s*$/im, "")
+    .trim();
+  try {
+    return JSON.parse(fenceStripped);
+  } catch { /* fall through */ }
+
+  // Step 4 — try extracting braces from the fence-stripped version
+  const fb2 = fenceStripped.indexOf("{");
+  const lb2 = fenceStripped.lastIndexOf("}");
+  if (fb2 !== -1 && lb2 > fb2) {
+    const candidate2 = fenceStripped.slice(fb2, lb2 + 1);
+    try {
+      return JSON.parse(candidate2);
+    } catch { /* fall through */ }
+  }
+
+  // All attempts failed — log enough context for diagnosis without leaking secrets
+  console.error(
+    "[Gemini] JSON parse failed. Response length:", text.length,
+    "| First 120 chars:", text.slice(0, 120).replace(/\n/g, "\\n")
+  );
+  throw new AppError("AI returned an unexpected response format. Please try again.", 502);
+};
+
+// ─── Helper: sleep for a given number of milliseconds ────────────────────────
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// ─── Helper: call Gemini with one automatic retry on transient failures ───────
+//
+// Retries ONLY on errors that are genuinely transient:
+//   • Network-level failures (ECONNRESET, ETIMEDOUT, fetch errors)
+//   • Gemini 503 / 429 (overloaded / rate-limited at the API level)
+//
+// Does NOT retry:
+//   • 400 Bad Request (bad prompt / malformed request) — permanent
+//   • 401 / 403 (invalid API key / auth) — permanent
+//   • Our own AppError instances (validation failures) — permanent
+//   • Successful responses that fail validation — handled by callers
+//
+// Delay: 1 500 ms — long enough for a transient overload to pass, short
+// enough not to noticeably hurt the user experience.
+//
+const RETRY_DELAY_MS = 1500;
+const TRANSIENT_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+
+const isTransientGeminiError = (err) => {
+  // Our own operational errors (AppError) — never retry
+  if (err?.isOperational) return false;
+  // Gemini SDK wraps HTTP errors with a status property
+  if (err?.status !== undefined) return TRANSIENT_STATUS_CODES.has(err.status);
+  // Network-level errors (Node.js fetch / undici)
+  const code = err?.code ?? "";
+  return (
+    code === "ECONNRESET" ||
+    code === "ECONNREFUSED" ||
+    code === "ETIMEDOUT" ||
+    code === "ENOTFOUND" ||
+    code === "UND_ERR_CONNECT_TIMEOUT" ||
+    err?.message?.includes("fetch failed") ||
+    err?.message?.includes("network")
+  );
+};
+
+const callGeminiWithRetry = async (model, prompt) => {
+  try {
+    return await model.generateContent(prompt);
+  } catch (firstErr) {
+    if (!isTransientGeminiError(firstErr)) throw firstErr;
+
+    // Log the transient failure (no secrets in err.message for network errors)
+    console.warn(
+      "[Gemini] Transient error on first attempt — retrying in",
+      RETRY_DELAY_MS,
+      "ms. Error type:",
+      firstErr?.code || firstErr?.status || firstErr?.constructor?.name
+    );
+
+    await sleep(RETRY_DELAY_MS);
+
+    // Second attempt — let any error propagate naturally
+    return await model.generateContent(prompt);
   }
 };
 
@@ -225,9 +350,9 @@ ${RECIPE_JSON_SCHEMA}
 Extra rule: Use ONLY the provided ingredients plus common pantry staples (salt, pepper, oil, water, basic spices).
 `.trim();
 
-  // Call Gemini
+  // Call Gemini — one automatic retry on transient network/overload errors
   const model = getGeminiModel();
-  const result = await model.generateContent(prompt);
+  const result = await callGeminiWithRetry(model, prompt);
   const recipeData = parseGeminiJSON(result.response.text());
 
   if (!recipeData.title || !recipeData.ingredients || !recipeData.instructions) {
@@ -279,9 +404,9 @@ Make the recipe as accurate and traditional as possible for this dish.
 ${RECIPE_JSON_SCHEMA}
 `.trim();
 
-  // Call Gemini
+  // Call Gemini — one automatic retry on transient network/overload errors
   const model = getGeminiModel();
-  const result = await model.generateContent(prompt);
+  const result = await callGeminiWithRetry(model, prompt);
   const recipeData = parseGeminiJSON(result.response.text());
 
   if (!recipeData.title || !recipeData.ingredients || !recipeData.instructions) {
@@ -346,7 +471,7 @@ Rules:
 `.trim();
 
   const model = getGeminiModel();
-  const result = await model.generateContent(prompt);
+  const result = await callGeminiWithRetry(model, prompt);
   const data = parseGeminiJSON(result.response.text());
 
   res.json({ success: true, data });
@@ -403,7 +528,7 @@ Rules:
 `.trim();
 
   const model = getGeminiModel();
-  const result = await model.generateContent(prompt);
+  const result = await callGeminiWithRetry(model, prompt);
   const planData = parseGeminiJSON(result.response.text());
 
   if (!planData.days || planData.days.length !== Number(durationDays)) {

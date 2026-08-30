@@ -27,9 +27,16 @@ connectDB();
 // ─── Security Middleware ──────────────────────────────────────────────────────
 app.use(helmet());
 
+app.use(
+  cors({
+    origin: process.env.CLIENT_URL || "http://localhost:8080",
+    credentials: true,
+  })
+);
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 100,
+  skip: (req) => req.method === "OPTIONS",
   message: { success: false, message: "Too many requests, please try again later." },
 });
 app.use("/api/", limiter);
@@ -38,17 +45,12 @@ app.use("/api/", limiter);
 const aiLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
   max: 20,
+  skip: (req) => req.method === "OPTIONS",
   message: { success: false, message: "AI request limit reached. Please try again in an hour." },
 });
 app.use("/api/ai/", aiLimiter);
 
 // ─── General Middleware ───────────────────────────────────────────────────────
-app.use(
-  cors({
-    origin: process.env.CLIENT_URL || "http://localhost:8080",
-    credentials: true,
-  })
-);
 app.use(express.json({ limit: "10kb" }));
 app.use(morgan(process.env.NODE_ENV === "development" ? "dev" : "combined"));
 

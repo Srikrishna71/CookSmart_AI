@@ -43,7 +43,19 @@ const errorHandler = (err, req, res, next) => {
 
   // ── Log unexpected errors (not operational AppErrors) ──────────────────────
   if (!err.isOperational) {
-    console.error("🔥 Unexpected error:", err);
+    // Build a safe log payload — never include API keys, JWTs, or passwords.
+    const safeLog = {
+      name:    err.name,
+      status:  err.status  ?? err.statusCode ?? "unknown",
+      code:    err.code    ?? undefined,
+      message: err.message ?? "no message",
+      // Gemini SDK wraps errors with errorDetails — safe to log (no secrets there)
+      details: err.errorDetails ?? undefined,
+    };
+    console.error("🔥 Unexpected error:", JSON.stringify(safeLog));
+    if (process.env.NODE_ENV === "development") {
+      console.error(err.stack);
+    }
   }
 
   res.status(statusCode).json({
