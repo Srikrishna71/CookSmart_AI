@@ -36,7 +36,7 @@ const RecipeFeed = () => {
     ...(searchQuery.trim()               ? { search: searchQuery.trim() }                    : {}),
     ...(selectedCuisine !== 'All'        ? { cuisine: selectedCuisine }                      : {}),
     ...(selectedType !== 'all'           ? { category: selectedType as 'veg' | 'non-veg' | 'vegan' } : {}),
-    limit: 24,
+    limit: 100,
   }), [searchQuery, selectedCuisine, selectedType]);
 
   const { recipes: rawRecipes, pagination, isLoading, error, refetch } = useRecipes(apiParams);
