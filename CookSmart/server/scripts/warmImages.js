@@ -9,8 +9,10 @@
  * shows the placeholder instead of the "Free limit reached" tile. Re-run
  * the script later to retry those.
  *
- * Use your PRODUCTION Mongo URI if that is where the broken recipes live:
- *   MONGO_URI="mongodb+srv://..." node scripts/warmImages.js
+ * Pass your PRODUCTION Mongo URI as the first argument (works in every shell;
+ * keep the double quotes):
+ *   node scripts/warmImages.js "mongodb+srv://user:pass@cluster/db"
+ * or set MONGO_URI in the same terminal / in server/.env.
  */
 const path = require("path");
 require("dotenv").config();
@@ -21,7 +23,17 @@ const Recipe = require("../models/Recipe");
 const { buildImageUrl, waitForImage } = require("../utils/pollinationsImage");
 
 const run = async () => {
-  await mongoose.connect(process.env.MONGO_URI);
+  const uri = process.argv[2] || process.env.MONGO_URI;
+  if (!uri) {
+    console.error(
+      '❌ No MongoDB URI found.\n' +
+      '   Run:  node scripts/warmImages.js "your-production-mongo-uri"\n' +
+      '   (keep the double quotes; copy the value of MONGO_URI from your Render dashboard)'
+    );
+    process.exit(1);
+  }
+
+  await mongoose.connect(uri);
   console.log("✅ Connected to MongoDB");
 
   const recipes = await Recipe.find({
