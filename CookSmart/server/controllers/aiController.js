@@ -268,12 +268,7 @@ Rules:
 // ─── Helper: build Pollinations AI image URL ───────────────────────────────────
 // Free, no API key required. URL format:
 //   https://image.pollinations.ai/prompt/<url-encoded-prompt>
-const buildImageUrl = (recipeTitle) => {
-  const prompt = recipeTitle
-    ? `${recipeTitle} food`
-    : "delicious food";
-  return `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}`;
-};
+const { buildImageUrl, queueImageJob } = require("../utils/pollinationsImage");
 
 // ─── POST /api/ai/generate-recipe ─────────────────────────────────────────────
 //
@@ -360,7 +355,7 @@ Extra rule: Use ONLY the provided ingredients plus common pantry staples (salt, 
   }
 
   // Assign Pollinations AI image — replaces any placeholder
-  recipeData.image = buildImageUrl(recipeData.title);
+  recipeData.image = "";
 
   // Persist
   const recipe = await Recipe.create({
@@ -369,6 +364,8 @@ Extra rule: Use ONLY the provided ingredients plus common pantry staples (salt, 
     createdBy: req.user._id,
     sourceIngredients: ingredientList,
   });
+
+  queueImageJob(recipe._id, recipe.title);
 
   // Ingredient diff
   const { youHaveIngredients, missingIngredients } = computeIngredientDiff(
@@ -414,7 +411,7 @@ ${RECIPE_JSON_SCHEMA}
   }
 
   // Assign Pollinations AI image
-  recipeData.image = buildImageUrl(recipeData.title);
+  recipeData.image = "";
 
   // Persist — no sourceIngredients for recipe-name mode
   const recipe = await Recipe.create({
@@ -423,6 +420,8 @@ ${RECIPE_JSON_SCHEMA}
     createdBy: req.user._id,
     // sourceIngredients deliberately omitted — not applicable for this mode
   });
+
+  queueImageJob(recipe._id, recipe.title);
 
   // In recipe-name mode the user hasn't declared any ingredients,
   // so they need to buy everything the recipe requires.
@@ -579,8 +578,7 @@ const generateStoryboard = async (req, res) => {
   }));
 
   // Fallback image if the recipe has no image stored
-  const image = recipe.image?.trim() ||
-    `https://image.pollinations.ai/prompt/${encodeURIComponent(recipe.title + " food")}`;
+  const image = recipe.image?.trim() || "/placeholder-recipe.jpg";
 
   res.json({
     success: true,
