@@ -265,10 +265,13 @@ Rules:
 - ingredients must have at least 2 items.
 `.trim();
 
-// ─── Helper: build Pollinations AI image URL ───────────────────────────────────
-// Free, no API key required. URL format:
-//   https://image.pollinations.ai/prompt/<url-encoded-prompt>
-const { buildImageUrl, queueImageJob } = require("../utils/pollinationsImage");
+// ─── Helper: Pollinations AI image generation (server-side) ───────────────────
+// resolveImage()  — one inline attempt before responding; returns the image URL
+//                   once Pollinations has really generated it, otherwise "".
+// queueImageJob() — background retries (one job at a time) that save
+//                   recipe.image when the picture is ready.
+// See server/utils/pollinationsImage.js for why (HTTP 402 "Free limit reached").
+const { resolveImage, queueImageJob } = require("../utils/pollinationsImage");
 
 // ─── POST /api/ai/generate-recipe ─────────────────────────────────────────────
 //
@@ -354,8 +357,8 @@ Extra rule: Use ONLY the provided ingredients plus common pantry staples (salt, 
     throw new AppError("AI generated an incomplete recipe. Please try again.", 502);
   }
 
-  // Assign Pollinations AI image — replaces any placeholder
-  recipeData.image = "";
+  // Pollinations image — one inline attempt; "" if it isn't ready yet
+  recipeData.image = await resolveImage(recipeData.title);
 
   // Persist
   const recipe = await Recipe.create({
@@ -365,7 +368,8 @@ Extra rule: Use ONLY the provided ingredients plus common pantry staples (salt, 
     sourceIngredients: ingredientList,
   });
 
-  queueImageJob(recipe._id, recipe.title);
+  // Image not ready inline → keep retrying in the background
+  if (!recipe.image) queueImageJob(recipe._id, recipe.title);
 
   // Ingredient diff
   const { youHaveIngredients, missingIngredients } = computeIngredientDiff(
@@ -410,8 +414,8 @@ ${RECIPE_JSON_SCHEMA}
     throw new AppError("AI generated an incomplete recipe. Please try again.", 502);
   }
 
-  // Assign Pollinations AI image
-  recipeData.image = "";
+  // Pollinations image — one inline attempt; "" if it isn't ready yet
+  recipeData.image = await resolveImage(recipeData.title);
 
   // Persist — no sourceIngredients for recipe-name mode
   const recipe = await Recipe.create({
@@ -421,7 +425,8 @@ ${RECIPE_JSON_SCHEMA}
     // sourceIngredients deliberately omitted — not applicable for this mode
   });
 
-  queueImageJob(recipe._id, recipe.title);
+  // Image not ready inline → keep retrying in the background
+  if (!recipe.image) queueImageJob(recipe._id, recipe.title);
 
   // In recipe-name mode the user hasn't declared any ingredients,
   // so they need to buy everything the recipe requires.

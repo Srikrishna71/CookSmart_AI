@@ -12,7 +12,7 @@
  * Pass your PRODUCTION Mongo URI as the first argument (works in every shell;
  * keep the double quotes):
  *   node scripts/warmImages.js "mongodb+srv://user:pass@cluster/db"
- * or set MONGO_URI in the same terminal / in server/.env.
+ * or set MONGODB_URI (or MONGO_URI) in the same terminal / in server/.env.
  */
 const path = require("path");
 require("dotenv").config();
@@ -23,12 +23,12 @@ const Recipe = require("../models/Recipe");
 const { buildImageUrl, waitForImage } = require("../utils/pollinationsImage");
 
 const run = async () => {
-  const uri = process.argv[2] || process.env.MONGO_URI;
+  const uri = process.argv[2] || process.env.MONGODB_URI || process.env.MONGO_URI;
   if (!uri) {
     console.error(
       '❌ No MongoDB URI found.\n' +
       '   Run:  node scripts/warmImages.js "your-production-mongo-uri"\n' +
-      '   (keep the double quotes; copy the value of MONGO_URI from your Render dashboard)'
+      '   (keep the double quotes; copy the MongoDB URI value from your Render dashboard)'
     );
     process.exit(1);
   }
